@@ -9,6 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  # hashFiles() is not allowed in a job-level `if`, so detect the stack in a step
+  # and let the language jobs read the outputs.
+  detect:
+    name: Detect stack
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.stack.outputs.python }}
+      node: ${{ steps.stack.outputs.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: stack
+        run: |
+          echo "python=$([ -f pyproject.toml ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "node=$([ -f package.json ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
@@ -33,7 +48,8 @@ jobs:
   python:
     name: Python (ruff, mypy, pytest)
     runs-on: ubuntu-latest
-    if: hashFiles('pyproject.toml') != ''
+    needs: detect
+    if: needs.detect.outputs.python == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -48,7 +64,8 @@ jobs:
   node:
     name: Node (lint, typecheck, test)
     runs-on: ubuntu-latest
-    if: hashFiles('package.json') != ''
+    needs: detect
+    if: needs.detect.outputs.node == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
