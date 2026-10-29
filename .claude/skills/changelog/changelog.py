@@ -10,6 +10,7 @@ and worktrees never conflict. CHANGELOG.md is rendered from those files.
   changelog.py validate
   changelog.py render
 """
+
 import argparse
 import json
 import re
@@ -20,8 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 TYPES = ["added", "changed", "fixed", "removed", "security", "docs"]
-ENTRIES = Path("changelog/entries")
-OUTPUT = Path("CHANGELOG.md")
 ID_RE = re.compile(r"^CL-\d{8}-\d{4}-[0-9a-f]{4}$")
 MIN_REASON = 15
 
@@ -34,11 +33,31 @@ def git(*args, strip=True):
         return ""
 
 
+# Paths are anchored at the repo root, so running from a subfolder still writes
+# entries where CI looks for them. Outside a git repo, the current folder is the root.
+ROOT = Path(git("rev-parse", "--show-toplevel") or ".")
+ENTRIES = ROOT / "changelog" / "entries"
+OUTPUT = ROOT / "CHANGELOG.md"
+
+
 def changed_files():
-    # Keep leading spaces: porcelain lines start with a two-character status code.
-    lines = git("status", "--porcelain", "--untracked-files=all", strip=False).splitlines()
-    files = sorted({line[3:].split(" -> ")[-1] for line in lines if len(line) > 3})
-    return [f for f in files if not f.startswith("changelog/") and f != str(OUTPUT)]
+    # -z gives raw paths (no quoting of spaces) separated by NUL. Each record is a
+    # two-character status, a space and the path; a rename or copy is followed by an
+    # extra record holding the old path, which we skip.
+    records = git(
+        "status", "--porcelain", "-z", "--untracked-files=all", strip=False
+    ).split("\0")
+    files, i = set(), 0
+    while i < len(records):
+        rec = records[i]
+        if len(rec) > 3:
+            files.add(rec[3:])
+            if rec[0] in "RC":
+                i += 1
+        i += 1
+    return sorted(
+        f for f in files if not f.startswith("changelog/") and f != "CHANGELOG.md"
+    )
 
 
 def new_id(now):
@@ -57,7 +76,19 @@ def reason_error(summary, reason):
 
 
 def load_entries():
-    entries = [json.loads(p.read_text()) for p in ENTRIES.glob("CL-*.json")]
+    entries = []
+    for p in ENTRIES.glob("CL-*.json"):
+        try:
+            e = json.loads(p.read_text())
+        except json.JSONDecodeError:
+            e = None
+        if not isinstance(e, dict) or not all(
+            k in e for k in ("id", "timestamp", "type", "summary", "reason")
+        ):
+            sys.exit(
+                f"error: {p.name} is malformed; run the validate command for details"
+            )
+        entries.append(e)
     return sorted(entries, key=lambda e: e["timestamp"], reverse=True)
 
 
@@ -66,7 +97,7 @@ def cmd_add(a):
     err = reason_error(summary, reason)
     if err:
         sys.exit(f"error: {err}")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)  # noqa: UP017 (datetime.UTC needs Python 3.11; macOS python3 is 3.9)
     entry = {
         "id": new_id(now),
         "timestamp": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -83,14 +114,16 @@ def cmd_add(a):
     ENTRIES.mkdir(parents=True, exist_ok=True)
     path = ENTRIES / f"{entry['id']}.json"
     path.write_text(json.dumps(entry, indent=2) + "\n")
-    print(f"{entry['id']}  {entry['timestamp']}  {path}")
+    print(f"{entry['id']}  {entry['timestamp']}  {path.relative_to(ROOT)}")
 
 
 def three_lines(e):
     """Every entry reads the same way: ID and timestamp, the change, the reason."""
-    return [f"{e['id']} · {e['timestamp']}",
-            f"Change: ({e['type']}) {e['summary']}",
-            f"Reason: {e['reason']}"]
+    return [
+        f"{e['id']} · {e['timestamp']}",
+        f"Change: ({e['type']}) {e['summary']}",
+        f"Reason: {e['reason']}",
+    ]
 
 
 def cmd_list(a):
@@ -115,6 +148,9 @@ def cmd_validate(_):
         except json.JSONDecodeError as exc:
             errors.append(f"{name}: invalid JSON ({exc})")
             continue
+        if not isinstance(e, dict):
+            errors.append(f"{name}: must be a JSON object")
+            continue
         if not ID_RE.match(str(e.get("id", ""))):
             errors.append(f"{name}: id must look like CL-YYYYMMDD-HHMM-xxxx")
         elif path.stem != e["id"]:
@@ -125,7 +161,10 @@ def cmd_validate(_):
             datetime.strptime(str(e.get("timestamp", "")), "%Y-%m-%dT%H:%M:%SZ")
         except ValueError:
             errors.append(f"{name}: timestamp must be UTC like 2026-10-29T14:05:32Z")
-        summary, reason = str(e.get("summary", "")).strip(), str(e.get("reason", "")).strip()
+        summary, reason = (
+            str(e.get("summary", "")).strip(),
+            str(e.get("reason", "")).strip(),
+        )
         if not summary:
             errors.append(f"{name}: summary is empty")
         err = reason_error(summary, reason)
@@ -139,12 +178,22 @@ def cmd_validate(_):
 
 
 def cmd_render(_):
-    lines = ["# Changelog", "", "Generated from changelog/entries/ by the changelog skill. Newest first; times in UTC.", ""]
+    lines = [
+        "# Changelog",
+        "",
+        "Generated from changelog/entries/ by the changelog skill. Newest first; times in UTC.",
+        "",
+    ]
     for e in load_entries():
         head, change, reason = three_lines(e)
-        lines += [f"### {head}", f"- **{change.replace(':', ':**', 1)}", f"- **{reason.replace(':', ':**', 1)}", ""]
+        lines += [
+            f"### {head}",
+            f"- **{change.replace(':', ':**', 1)}",
+            f"- **{reason.replace(':', ':**', 1)}",
+            "",
+        ]
     OUTPUT.write_text("\n".join(lines))
-    print(f"rendered {len(load_entries())} entries to {OUTPUT}")
+    print(f"rendered {len(load_entries())} entries to {OUTPUT.name}")
 
 
 def main():

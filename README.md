@@ -11,6 +11,7 @@ CLAUDE.md                  rules Claude reads every session
 SPEC.md                    fill in per project from the portfolio doc
 LEARNING.md                your daily five-line log
 .claude/settings.json      project permissions + format-on-edit hook (committed)
+.claude/hooks/             format-edited-file.sh: formats only the file Claude just edited
 .claude/agents/            scope-reviewer, security-reviewer, test-writer subagents
 .claude/skills/            /adr, /ship-check, /interview-me (manual) and changelog skills
 changelog/entries/         one JSON file per changelog entry (CL-YYYYMMDD-HHMM-xxxx.json)
@@ -59,10 +60,13 @@ These run on your machine, not in a Claude session. On Windows, do all of it ins
 
 Install exactly two plugins, both language servers from the official marketplace.
 
-1. Install the server binaries and check they're on your PATH:
+1. Install the server binaries and check they're on your PATH. Pin `typescript@6`:
+   TypeScript 7 (now `latest` on npm) no longer ships `tsserver`, so
+   `typescript-language-server` fails with "Could not find a valid TypeScript installation".
    ```bash
-   npm install -g typescript-language-server typescript pyright
+   npm install -g typescript-language-server typescript@6 pyright
    which typescript-language-server pyright-langserver
+   tsc --version    # must print 6.x
    ```
 2. In a Claude Code session, install each plugin and choose **Install for you (user scope)**
    so nothing is written into the repo's committed settings:
@@ -70,8 +74,16 @@ Install exactly two plugins, both language servers from the official marketplace
    /plugin install typescript-lsp@claude-plugins-official
    /plugin install pyright-lsp@claude-plugins-official
    ```
+   If either says the marketplace `claude-plugins-official` isn't found, add it and retry:
+   `/plugin marketplace add anthropics/claude-plugins-official`.
 3. Confirm only what you intended is loaded: `claude plugin list` in a terminal, `/skills`
-   inside a session.
+   inside a session. Each plugin should show 0 skills, hooks and MCP servers and ~0 tokens
+   (`claude plugin details pyright-lsp`).
+4. Confirm the servers start (they launch on the first edit, and only in local terminal
+   sessions, not cloud sessions). Ask Claude: *"In a scratch .py file, add a call that passes
+   a string where an int is expected, then fix it."* A line like
+   `Found 1 new diagnostic issue in 1 file` must appear under the edit; repeat with a `.ts`
+   file. If not, `/plugin` → **Errors** tab names the missing binary.
 
 Skip `/autofix-pr`, the `commit-commands` and `github` plugins, `/batch`, and any community
 marketplace: they push for you, duplicate `gh`, or add third-party code you don't need.
