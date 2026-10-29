@@ -23,13 +23,13 @@
 - [ ]
 
 ## Deliverables
-<!-- The seven deliverables from the portfolio doc; /ship-check reports against this list. -->
-1.
-2.
-3.
-4.
-5.
-6.
-7.
+<!-- /ship-check reports against this list. Replace each placeholder with a link or path. -->
+1. Live demo link:
+2. README with architecture diagram: README.md
+3. ADRs: docs/adr/
+4. Integration guide:
+5. Runbook:
+6. CI passing: .github/workflows/ci.yml
+7. Demo video link:
 
 ## Open questions

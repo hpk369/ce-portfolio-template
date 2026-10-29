@@ -11,9 +11,10 @@ CLAUDE.md                  rules Claude reads every session
 SPEC.md                    fill in per project from the portfolio doc
 LEARNING.md                your daily five-line log
 .claude/settings.json      project permissions + format-on-edit hook (committed)
-.claude/agents/            reviewer, security-reviewer, test-writer subagents
-.claude/skills/            adr, ship-check, interview-me, changelog skills
-changelog/entries/         one JSON file per changelog entry
+.claude/agents/            scope-reviewer, security-reviewer, test-writer subagents
+.claude/skills/            /adr, /ship-check, /interview-me (manual) and changelog skills
+changelog/entries/         one JSON file per changelog entry (CL-YYYYMMDD-HHMM-xxxx.json)
+tests/test_changelog.py    tests for the changelog script (stdlib unittest)
 .env.example               variable names only, no values
 .pre-commit-config.yaml    gitleaks secret scan before every commit
 .github/workflows/ci.yml   secret scan, changelog check, Python and/or Node lint, types, tests
@@ -23,7 +24,8 @@ scripts/                   live-API scripts you run yourself
 ```
 
 CI detects the stack: the Python job runs when `pyproject.toml` exists, the Node job when
-`package.json` exists. The secret-scan and changelog jobs always run.
+`package.json` exists. The secret-scan and changelog jobs always run, and every pull request
+must add at least one changelog entry.
 
 ## One-time setup (per machine)
 
@@ -52,6 +54,38 @@ These run on your machine, not in a Claude session. On Windows, do all of it ins
    ask Claude to run `touch ~/sandbox-probe`. It must fail with "Operation not permitted" or
    "Read-only file system". If Claude offers to retry outside the sandbox, decline.
 5. In `/config`, set the output style to **Explanatory** or **Learning**.
+
+## One-time setup: plugins (per machine, user scope)
+
+Install exactly two plugins, both language servers from the official marketplace.
+
+1. Install the server binaries and check they're on your PATH:
+   ```bash
+   npm install -g typescript-language-server typescript pyright
+   which typescript-language-server pyright-langserver
+   ```
+2. In a Claude Code session, install each plugin and choose **Install for you (user scope)**
+   so nothing is written into the repo's committed settings:
+   ```text
+   /plugin install typescript-lsp@claude-plugins-official
+   /plugin install pyright-lsp@claude-plugins-official
+   ```
+3. Confirm only what you intended is loaded: `claude plugin list` in a terminal, `/skills`
+   inside a session.
+
+Skip `/autofix-pr`, the `commit-commands` and `github` plugins, `/batch`, and any community
+marketplace: they push for you, duplicate `gh`, or add third-party code you don't need.
+
+## Built-in commands by stage
+
+| Stage | Commands |
+| --- | --- |
+| First session in a new repo | `/init` (edit the result down), `/run-skill-generator` once the app runs |
+| Start of every slice | `/plan` |
+| During a task | `/claude-api` (`build-eval` for P5, `cost-optimize` for P6), `/context`, `/usage` |
+| After implementing | `/verify` |
+| Before you push, in this order | `/code-review` → `/security-review` → `/simplify`, plus the `scope-reviewer` subagent |
+| Weekly | `/doctor`; `/fewer-permission-prompts` once a project is underway (read what it adds) |
 
 ## One-time setup (GitHub, this template repo)
 
@@ -93,8 +127,11 @@ your full access: read the compose file before approving each run. For Project 4
    that prove it, and any decision I need to make. Don't write code."*
 4. **Test first** — accept-edits mode; use the `test-writer` subagent, then implement.
 5. **Verify** — Claude runs tests, lint, types; then *"prove this works"* end to end.
-6. **Review** — read `git diff` yourself; ask the `reviewer` (and `security-reviewer`) subagent.
-7. **Commit and ship** — `/changelog`, conventional commit; *you* push, `gh pr create`, merge on green.
+6. **Review** — read `git diff` yourself; run `/code-review`, `/security-review`, `/simplify`,
+   and ask the `scope-reviewer` subagent (plus `security-reviewer` for P3, P4, P6).
+7. **Commit and ship** — changelog entry (you confirm the reason), conventional commit; *you*
+   push, `gh pr create`, merge on green. After merging, render `CHANGELOG.md` on `main`:
+   `python3 .claude/skills/changelog/changelog.py render`.
 8. **Capture** — `/adr` draft, rewrite it yourself; *"Update CLAUDE.md so this doesn't happen again."*
 
 ## Daily and weekly

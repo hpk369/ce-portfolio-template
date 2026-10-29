@@ -40,10 +40,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python3 .claude/skills/changelog/changelog.py validate
+      - name: Test the changelog tool
+        run: python3 -m unittest discover -s tests -p "test_changelog.py"
+      - name: Validate entries
+        run: python3 .claude/skills/changelog/changelog.py validate
+      - name: Require a changelog entry
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+            | grep -q '^changelog/entries/CL-' \
+            || { echo "Add a changelog entry with the changelog skill"; exit 1; }
 
   python:
     name: Python (ruff, mypy, pytest)

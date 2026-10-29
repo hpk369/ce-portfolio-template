@@ -1,7 +1,0 @@
-{
-  "id": "20261029T142859Z-26f0",
-  "timestamp": "2026-10-29T14:28:59Z",
-  "type": "fix",
-  "summary": "CI workflow now parses and runs; language jobs gated by a detect job",
-  "reason": "hashFiles() is not allowed in a job-level if, so GitHub rejected ci.yml and no jobs ran"
-}
