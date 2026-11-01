@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Test the changelog tool
-        run: python3 -m unittest discover -s tests -p "test_changelog.py"
+        run: python3 -m unittest discover -s tests -p "test_changelog*.py"
       - name: Validate entries
         run: python3 .claude/skills/changelog/changelog.py validate
       - name: Require a changelog entry
@@ -55,6 +55,30 @@ jobs:
           git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
             | grep -q '^changelog/entries/CL-' \
             || { echo "Add a changelog entry with the changelog skill"; exit 1; }
+
+  diagrams:
+    name: Code diagrams
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate fresh diagrams from the code
+        run: python3 .claude/skills/changelog/changelog.py diagrams
+      - name: Show diagrams in the run summary
+        run: cat docs/diagrams/architecture.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload diagrams
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-diagrams
+          path: docs/diagrams/
+      - name: Fail if the committed diagrams are stale
+        run: |
+          git diff --exit-code -- docs/diagrams/ \
+            || { echo "::error::Diagrams are out of date. Run: python3 .claude/skills/changelog/changelog.py diagrams, then commit docs/diagrams/"; exit 1; }
+          test -z "$(git status --porcelain -- docs/diagrams/)" \
+            || { echo "::error::docs/diagrams/architecture.md is not committed"; exit 1; }
 
   python:
     name: Python (ruff, mypy, pytest)

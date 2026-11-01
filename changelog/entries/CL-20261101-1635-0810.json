@@ -1,0 +1,23 @@
+{
+  "id": "CL-20261101-1635-0810",
+  "timestamp": "2026-11-01T16:35:45Z",
+  "type": "added",
+  "summary": "Generated code diagrams (components, UML classes, call graph) refreshed on every commit and checked in CI",
+  "reason": "Each portfolio project needs an up-to-date architecture view I can show and explain in interviews, and hand-drawn diagrams go stale as soon as the code changes",
+  "issue": null,
+  "adr": null,
+  "branch": "claude/magical-goodall-v08isu",
+  "base_commit": "1b7e32d",
+  "author": "Claude",
+  "files": [
+    ".claude/skills/changelog/SKILL.md",
+    ".claude/skills/changelog/changelog.py",
+    ".github/workflows/ci.yml",
+    ".pre-commit-config.yaml",
+    "CLAUDE.md",
+    "README.md",
+    "SPEC.md",
+    "docs/diagrams/architecture.md",
+    "tests/test_changelog_diagrams.py"
+  ]
+}

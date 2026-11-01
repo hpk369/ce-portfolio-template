@@ -28,3 +28,6 @@ Other commands:
 - Check every entry is well formed (CI runs this): python3 .claude/skills/changelog/changelog.py validate
 - Rebuild CHANGELOG.md: python3 .claude/skills/changelog/changelog.py render
   Only on main after merging, never on a feature branch.
+- Regenerate code diagrams: python3 .claude/skills/changelog/changelog.py diagrams
+  Writes docs/diagrams/architecture.md (components, UML classes, call graph). The
+  pre-commit hook runs it on every commit; stage docs/diagrams/ with the code change.

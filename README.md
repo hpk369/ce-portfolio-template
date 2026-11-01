@@ -20,13 +20,39 @@ tests/test_changelog.py    tests for the changelog script (stdlib unittest)
 .pre-commit-config.yaml    gitleaks secret scan before every commit
 .github/workflows/ci.yml   secret scan, changelog check, Python and/or Node lint, types, tests
 docs/adr/0000-template.md  decision record template
+docs/diagrams/             generated code diagrams (components, UML classes, call graph)
 setup/user-settings.json   security baseline for ~/.claude/settings.json (one-time, per machine)
 scripts/                   live-API scripts you run yourself
 ```
 
 CI detects the stack: the Python job runs when `pyproject.toml` exists, the Node job when
-`package.json` exists. The secret-scan and changelog jobs always run, and every pull request
-must add at least one changelog entry.
+`package.json` exists. The secret-scan, changelog and code-diagrams jobs always run, and every
+pull request must add at least one changelog entry.
+
+## Code diagrams
+
+`python3 .claude/skills/changelog/changelog.py diagrams` reads the Python and
+TypeScript/JavaScript source (standard library only, no Graphviz or Java) and writes
+`docs/diagrams/architecture.md` with three Mermaid diagrams that GitHub renders inline:
+
+| Diagram | Like | Shows |
+| --- | --- | --- |
+| Components | Structurizr (C4 component view) | modules grouped by package or folder; arrows are imports |
+| Classes | Umbrello (UML class diagram) | attributes, methods, visibility, `<<interface>>`/`<<abstract>>`, inheritance and implements |
+| Call graph | Doxygen call graph | which project function calls which (Python) |
+
+Tests, `.venv`, `node_modules`, dot-folders and untracked files are left out, so the
+diagrams show exactly what is committed.
+
+- **On every commit**, the `code-diagrams` pre-commit hook regenerates the file. If it changed,
+  the commit stops once: review the diff, `git add docs/diagrams`, and commit again.
+- **On every push and PR**, the `Code diagrams` CI job regenerates them from scratch, shows them
+  in the run summary, uploads them as the `code-diagrams` artifact, and fails if the committed
+  copy is stale (for example, a commit made with `--no-verify`).
+
+Add `Code diagrams` to the required checks in your `main` ruleset to enforce this. Link the file
+from each project's README for the "README with architecture diagram" deliverable; draw the
+hand-made context diagram (customer systems, external APIs) yourself, since no tool can infer it.
 
 ## One-time setup (per machine)
 

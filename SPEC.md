@@ -25,7 +25,7 @@
 ## Deliverables
 <!-- /ship-check reports against this list. Replace each placeholder with a link or path. -->
 1. Live demo link:
-2. README with architecture diagram: README.md
+2. README with architecture diagram: README.md (generated diagrams: docs/diagrams/architecture.md)
 3. ADRs: docs/adr/
 4. Integration guide:
 5. Runbook:

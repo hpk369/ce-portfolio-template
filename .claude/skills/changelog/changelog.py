@@ -9,10 +9,21 @@ and worktrees never conflict. CHANGELOG.md is rendered from those files.
   changelog.py show CL-20261029-1405-a3f2
   changelog.py validate
   changelog.py render
+  changelog.py diagrams [--check | --fail-on-change]
+
+The diagrams command reads the project's Python and TypeScript/JavaScript source
+and writes docs/diagrams/architecture.md with three Mermaid diagrams, which GitHub
+renders inline: a component view of module imports (like Structurizr), a UML class
+diagram (like Umbrello) and a call graph (like Doxygen). Output is deterministic, so
+--check can fail CI when the committed diagrams are stale.
 """
 
+from __future__ import annotations
+
 import argparse
+import ast
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -196,6 +207,490 @@ def cmd_render(_):
     print(f"rendered {len(load_entries())} entries to {OUTPUT.name}")
 
 
+# --- Code diagrams ----------------------------------------------------------
+
+DIAGRAMS = ROOT / "docs" / "diagrams" / "architecture.md"
+PY_EXT = (".py",)
+JS_EXT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+# Tests, tooling and generated folders would drown out the application's structure.
+SKIP_DIRS = {
+    "node_modules",
+    "venv",
+    "tests",
+    "test",
+    "__tests__",
+    "dist",
+    "build",
+    "coverage",
+    "docs",
+    "changelog",
+    "__pycache__",
+}
+
+
+def is_source(rel: str) -> bool:
+    parts = rel.split("/")
+    if any(d.startswith(".") or d in SKIP_DIRS for d in parts[:-1]):
+        return False
+    name = parts[-1]
+    if name.endswith((".d.ts", "_test.py")) or name.startswith("test_"):
+        return False
+    if re.search(r"\.(test|spec)\.[cm]?[jt]sx?$", name):
+        return False
+    return name.endswith(PY_EXT + JS_EXT)
+
+
+def source_files() -> list[str]:
+    # In a git repo use the index, so the diagrams match what is committed (and what
+    # CI sees); untracked scratch files stay out. Otherwise walk the folder.
+    listed = git("ls-files", "-z", strip=False)
+    if listed:
+        rels = [f for f in listed.split("\0") if f]
+    else:
+        rels = [
+            str(p.relative_to(ROOT)).replace(os.sep, "/")
+            for p in ROOT.rglob("*")
+            if p.is_file()
+        ]
+    return sorted(f for f in rels if is_source(f) and (ROOT / f).is_file())
+
+
+def node_id(name: str) -> str:
+    return "n_" + re.sub(r"\W", "_", name)
+
+
+class Model:
+    """What the diagrams draw, collected from every source file."""
+
+    def __init__(self) -> None:
+        self.modules: dict[str, str] = {}  # module name -> language
+        self.imports: set[tuple[str, str]] = set()
+        self.classes: dict[str, dict] = {}  # "module.Class" -> details
+        self.functions: set[str] = set()  # "module.func" and "module.Class.method"
+        self.calls: set[tuple[str, str]] = set()
+
+
+def py_module_name(rel: str) -> str:
+    parts = rel[: -len(".py")].split("/")
+    if parts[0] == "src" and len(parts) > 1:
+        parts = parts[1:]
+    if parts[-1] == "__init__" and len(parts) > 1:
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def py_resolve(name: str, known: dict[str, str]) -> str | None:
+    """Longest project module that name refers to, or None for third-party code."""
+    parts = name.split(".")
+    for i in range(len(parts), 0, -1):
+        candidate = ".".join(parts[:i])
+        if known.get(candidate) == "python":
+            return candidate
+    return None
+
+
+def py_args(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    names = [a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs]
+    return ", ".join(n for n in names if n not in ("self", "cls"))
+
+
+def py_callee(
+    model: Model, call: ast.Call, mod: str, cls: str | None, aliases: dict[str, str]
+) -> str | None:
+    """The project function a call refers to: local, imported, module.attr or self.method."""
+    f = call.func
+    if isinstance(f, ast.Name):
+        for cand in (f"{mod}.{f.id}", aliases.get(f.id, "")):
+            if cand in model.functions:
+                return cand
+    elif isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+        own = f"{mod}.{cls}.{f.attr}"
+        if f.value.id in ("self", "cls") and cls and own in model.functions:
+            return own
+        cand = f"{aliases.get(f.value.id, f.value.id)}.{f.attr}"
+        if cand in model.functions:
+            return cand
+    return None
+
+
+def py_scan_calls(
+    model: Model,
+    fn: ast.AST,
+    caller: str,
+    mod: str,
+    cls: str | None,
+    aliases: dict[str, str],
+) -> None:
+    for sub in ast.walk(fn):
+        if isinstance(sub, ast.Call):
+            target = py_callee(model, sub, mod, cls, aliases)
+            if target and target != caller:
+                model.calls.add((caller, target))
+
+
+def collect_python(model: Model, files: dict[str, str]) -> None:
+    trees = {}
+    for rel, mod in files.items():
+        try:
+            trees[mod] = (rel, ast.parse((ROOT / rel).read_text(encoding="utf-8"), rel))
+        except (SyntaxError, UnicodeDecodeError) as exc:
+            print(f"warning: skipped {rel}: {exc}", file=sys.stderr)
+    for mod in trees:
+        model.modules[mod] = "python"
+    # First pass: what each module defines.
+    for mod, (_, tree) in trees.items():
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                model.functions.add(f"{mod}.{node.name}")
+            elif isinstance(node, ast.ClassDef):
+                attrs, methods = set(), []
+                for item in node.body:
+                    if isinstance(item, ast.AnnAssign) and isinstance(
+                        item.target, ast.Name
+                    ):
+                        attrs.add(item.target.id)
+                    elif isinstance(item, ast.Assign):
+                        attrs.update(
+                            t.id for t in item.targets if isinstance(t, ast.Name)
+                        )
+                    elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        model.functions.add(f"{mod}.{node.name}.{item.name}")
+                        for sub in ast.walk(item):
+                            if isinstance(sub, (ast.Assign, ast.AnnAssign)):
+                                targets = (
+                                    sub.targets
+                                    if isinstance(sub, ast.Assign)
+                                    else [sub.target]
+                                )
+                                for t in targets:
+                                    if (
+                                        isinstance(t, ast.Attribute)
+                                        and isinstance(t.value, ast.Name)
+                                        and t.value.id == "self"
+                                    ):
+                                        attrs.add(t.attr)
+                        if not (
+                            item.name.startswith("__") and item.name.endswith("__")
+                        ):
+                            ret = (
+                                item.returns.id
+                                if isinstance(item.returns, ast.Name)
+                                else ""
+                            )
+                            methods.append((item.name, py_args(item), ret))
+                model.classes[f"{mod}.{node.name}"] = {
+                    "name": node.name,
+                    "module": mod,
+                    "attrs": sorted(attrs),
+                    "methods": methods,
+                    "bases": [ast.unparse(b) for b in node.bases],
+                    "implements": [],
+                    "stereotype": "abstract"
+                    if any(
+                        ast.unparse(b) in ("ABC", "abc.ABC", "Protocol")
+                        for b in node.bases
+                    )
+                    else "",
+                }
+    # Second pass: imports and calls, resolved against what the project defines.
+    for mod, (rel, tree) in trees.items():
+        is_pkg = rel.endswith("__init__.py")
+        aliases: dict[str, str] = {}  # local name -> "module" or "module.name"
+        for imp in ast.walk(tree):
+            if isinstance(imp, ast.Import):
+                for a in imp.names:
+                    target = py_resolve(a.name, model.modules)
+                    if target:
+                        model.imports.add((mod, target))
+                        aliases[a.asname or a.name.split(".")[0]] = (
+                            target if a.asname else a.name.split(".")[0]
+                        )
+            elif isinstance(imp, ast.ImportFrom):
+                base = imp.module or ""
+                if imp.level:
+                    pkg = mod.split(".") if is_pkg else mod.split(".")[:-1]
+                    pkg = pkg[: len(pkg) - (imp.level - 1)] if imp.level > 1 else pkg
+                    base = ".".join(pkg + ([imp.module] if imp.module else []))
+                for a in imp.names:
+                    target = py_resolve(
+                        f"{base}.{a.name}", model.modules
+                    ) or py_resolve(base, model.modules)
+                    if target:
+                        model.imports.add((mod, target))
+                        aliases[a.asname or a.name] = f"{base}.{a.name}"
+        model.imports.discard((mod, mod))
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                py_scan_calls(model, node, f"{mod}.{node.name}", mod, None, aliases)
+            elif isinstance(node, ast.ClassDef):
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        caller = f"{mod}.{node.name}.{item.name}"
+                        py_scan_calls(model, item, caller, mod, node.name, aliases)
+
+
+JS_IMPORT = re.compile(
+    r"""(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\(\s*)['"](\.{1,2}/[^'"]+)['"]"""
+)
+JS_CLASS = re.compile(
+    r"\b(abstract\s+)?(class|interface)\s+(\w+)(?:<[^>{]*>)?"
+    r"(?:\s+extends\s+([\w.,\s]+?))?(?:\s+implements\s+([\w.,\s]+?))?\s*\{"
+)
+JS_METHOD = re.compile(
+    r"^\s*(?:(?:public|private|protected|static|async|readonly|override|get|set)\s+)*(#?\w+)\s*\(([^)]*)\)"
+)
+JS_FIELD = re.compile(
+    r"^\s*(?:(?:public|private|protected|static|readonly)\s+)*(#?\w+)\s*[?!]?\s*[:=]"
+)
+JS_KEYWORDS = {
+    "if",
+    "for",
+    "while",
+    "switch",
+    "catch",
+    "return",
+    "function",
+    "constructor",
+    "super",
+}
+
+
+def js_resolve(rel: str, spec: str, known: set[str]) -> str | None:
+    base = os.path.normpath(os.path.join(os.path.dirname(rel), spec)).replace(
+        os.sep, "/"
+    )
+    base = re.sub(r"\.[cm]?[jt]sx?$", "", base)
+    for cand in (base, f"{base}/index"):
+        if cand in known:
+            return cand
+    return None
+
+
+def collect_js(model: Model, files: list[str]) -> None:
+    mods = {re.sub(r"\.[cm]?[jt]sx?$", "", f): f for f in files}
+    for js_mod in mods:
+        model.modules[js_mod] = "typescript"
+    for mod, rel in mods.items():
+        text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
+        for spec in JS_IMPORT.findall(text):
+            target = js_resolve(rel, spec, set(mods))
+            if target and target != mod:
+                model.imports.add((mod, target))
+        for match in JS_CLASS.finditer(text):
+            # Members are lines at brace depth 1 inside the class body.
+            depth, i, body = 1, match.end(), []
+            line, line_depth = "", 1
+            while i < len(text) and depth:
+                ch = text[i]
+                if ch == "\n":
+                    if line_depth == 1:
+                        body.append(line)
+                    line, line_depth = "", depth
+                elif depth == 1:
+                    line += ch
+                depth += {"{": 1, "}": -1}.get(ch, 0)
+                i += 1
+            if line_depth == 1:
+                body.append(line)
+            attrs, methods = set(), []
+            for ln in body:
+                m = JS_METHOD.match(ln)
+                if m and m.group(1) not in JS_KEYWORDS:
+                    private = m.group(1).startswith("#") or re.search(
+                        r"\bprivate\b", ln
+                    )
+                    args = ", ".join(
+                        a.split(":")[0].split("=")[0].strip(" ?.")
+                        for a in m.group(2).split(",")
+                        if a.strip()
+                    )
+                    methods.append(
+                        (
+                            "_" + m.group(1).lstrip("#") if private else m.group(1),
+                            args,
+                            "",
+                        )
+                    )
+                elif (f := JS_FIELD.match(ln)) and f.group(1) not in JS_KEYWORDS:
+                    private = f.group(1).startswith("#") or re.search(
+                        r"\bprivate\b", ln
+                    )
+                    attrs.add("_" + f.group(1).lstrip("#") if private else f.group(1))
+            abstract, kind, name = match.group(1), match.group(2), match.group(3)
+            bases = [b.strip() for b in (match.group(4) or "").split(",") if b.strip()]
+            impls = [b.strip() for b in (match.group(5) or "").split(",") if b.strip()]
+            model.classes[f"{mod}.{name}"] = {
+                "name": name,
+                "module": mod,
+                "attrs": sorted(attrs),
+                "methods": methods,
+                "bases": bases,
+                "implements": impls,
+                "stereotype": "interface"
+                if kind == "interface"
+                else "abstract"
+                if abstract
+                else "",
+            }
+
+
+def build_model() -> Model:
+    model = Model()
+    files = source_files()
+    collect_python(model, {f: py_module_name(f) for f in files if f.endswith(PY_EXT)})
+    collect_js(model, [f for f in files if f.endswith(JS_EXT)])
+    return model
+
+
+def parent(name: str, siblings: list[str]) -> str:
+    sep = "/" if "/" in name else "."
+    if any(o.startswith(name + sep) for o in siblings):
+        return name  # a package (its __init__) belongs inside its own group
+    return name.rsplit(sep, 1)[0] if sep in name else "(root)"
+
+
+def grouped_nodes(names: list[str], label) -> list[str]:
+    """Mermaid subgraphs: one per package or folder (or module, for functions)."""
+    groups: dict[str, list[str]] = {}
+    for n in names:
+        groups.setdefault(parent(n, names), []).append(n)
+    out = []
+    for g in sorted(groups):
+        out.append(f'  subgraph {node_id("g_" + g)}["{g}"]')
+        out += [f'    {node_id(n)}["{label(n)}"]' for n in sorted(groups[g])]
+        out.append("  end")
+    return out
+
+
+def diagrams_markdown(model: Model) -> str:
+    py = sum(1 for v in model.modules.values() if v == "python")
+    js = len(model.modules) - py
+    out = [
+        "# Code diagrams",
+        "",
+        "<!-- Generated by `python3 .claude/skills/changelog/changelog.py diagrams`. Do not edit:",
+        "     the pre-commit hook regenerates this file and CI fails if it is stale. -->",
+        "",
+        (
+            f"Python modules: {py}. TypeScript/JavaScript modules: {js}. "
+            f"Classes: {len(model.classes)}. Functions and methods: {len(model.functions)}."
+        ),
+        "Tests, tooling and dot-folders are left out.",
+        "",
+    ]
+    if not model.modules:
+        out += [
+            "_No source code yet. Diagrams appear here after the first module is committed._",
+            "",
+        ]
+        return "\n".join(out)
+
+    out += [
+        "## Components",
+        "",
+        (
+            'Each box is a module, grouped by package; an arrow means "imports" '
+            "(a component view, like Structurizr)."
+        ),
+        "",
+        "```mermaid",
+        "flowchart LR",
+    ]
+    out += grouped_nodes(
+        list(model.modules), lambda n: n.rsplit(".", 1)[-1].rsplit("/", 1)[-1]
+    )
+    out += [f"  {node_id(a)} --> {node_id(b)}" for a, b in sorted(model.imports)]
+    out += ["```", ""]
+
+    out += [
+        "## Classes",
+        "",
+        (
+            "Attributes and methods per class; `+` public, `-` private (underscore or `#`); "
+            "`<|--` inherits, `<|..` implements (a UML class diagram, like Umbrello)."
+        ),
+        "",
+    ]
+    if model.classes:
+        short = {}
+        for key, c in model.classes.items():
+            dupes = [k for k, d in model.classes.items() if d["name"] == c["name"]]
+            short[key] = c["name"] if len(dupes) == 1 else re.sub(r"\W", "_", key)
+        by_name = {c["name"]: k for k, c in model.classes.items()}
+        out += ["```mermaid", "classDiagram"]
+        for key in sorted(model.classes):
+            c = model.classes[key]
+            out.append(f"  class {short[key]}")
+            if c["stereotype"]:
+                out.append(f"  <<{c['stereotype']}>> {short[key]}")
+            for a in c["attrs"]:
+                out.append(
+                    f"  {short[key]} : {'-' if a.startswith('_') else '+'}{a.lstrip('_')}"
+                )
+            for name, args, ret in c["methods"]:
+                vis = "-" if name.startswith("_") else "+"
+                out.append(
+                    f"  {short[key]} : {vis}{name.lstrip('_')}({args}){' ' + ret if ret else ''}"
+                )
+        for key in sorted(model.classes):
+            for base in model.classes[key]["bases"]:
+                target = by_name.get(base.rsplit(".", 1)[-1])
+                if target:
+                    out.append(f"  {short[target]} <|-- {short[key]}")
+            for iface in model.classes[key]["implements"]:
+                target = by_name.get(iface.rsplit(".", 1)[-1])
+                if target:
+                    out.append(f"  {short[target]} <|.. {short[key]}")
+        out += ["```", ""]
+    else:
+        out += ["_No classes found._", ""]
+
+    out += [
+        "## Call graph",
+        "",
+        (
+            "Which project function calls which, grouped by module "
+            "(a call graph, like Doxygen). Python only; calls into libraries are left out."
+        ),
+        "",
+    ]
+    if model.calls:
+        used = sorted({n for edge in model.calls for n in edge})
+        out += ["```mermaid", "flowchart LR"]
+        out += grouped_nodes([n for n in used], lambda n: n.rsplit(".", 1)[-1] + "()")
+        out += [f"  {node_id(a)} --> {node_id(b)}" for a, b in sorted(model.calls)]
+        out += ["```", ""]
+    else:
+        out += ["_No calls between project functions found._", ""]
+    return "\n".join(out)
+
+
+def cmd_diagrams(a):
+    text = diagrams_markdown(build_model())
+    current = DIAGRAMS.read_text() if DIAGRAMS.exists() else None
+    rel = DIAGRAMS.relative_to(ROOT)
+    if a.check:
+        if current != text:
+            sys.exit(
+                f"error: {rel} is out of date; run: python3 .claude/skills/changelog/changelog.py diagrams"
+            )
+        print(f"{rel} is up to date")
+        return
+    if current == text:
+        print(f"{rel} unchanged")
+        return
+    DIAGRAMS.parent.mkdir(parents=True, exist_ok=True)
+    DIAGRAMS.write_text(text)
+    print(f"wrote {rel}")
+    if a.fail_on_change:
+        # pre-commit only notices edits to tracked files, so a first-time file would
+        # slip through; failing here stops the commit either way.
+        sys.exit(
+            f"{rel} was updated; review it, git add {rel.parent}, and commit again"
+        )
+
+
 def main():
     p = argparse.ArgumentParser(description="Record and render changelog entries")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -214,6 +709,14 @@ def main():
     show.set_defaults(fn=cmd_show)
     sub.add_parser("validate").set_defaults(fn=cmd_validate)
     sub.add_parser("render").set_defaults(fn=cmd_render)
+    dg = sub.add_parser("diagrams", help="write docs/diagrams/architecture.md")
+    dg.add_argument("--check", action="store_true", help="fail if the file is stale")
+    dg.add_argument(
+        "--fail-on-change",
+        action="store_true",
+        help="write, then fail if it changed (pre-commit)",
+    )
+    dg.set_defaults(fn=cmd_diagrams)
     a = p.parse_args()
     a.fn(a)
 
