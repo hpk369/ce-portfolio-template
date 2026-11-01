@@ -27,8 +27,8 @@
 1. Live demo link:
 2. README with architecture diagram: README.md (generated diagrams: docs/diagrams/architecture.md)
 3. ADRs: docs/adr/
-4. Integration guide:
-5. Runbook:
+4. Integration guide: docs/integration-guide.md
+5. Runbook: docs/runbook.md
 6. CI passing: .github/workflows/ci.yml
 7. Demo video link:
 

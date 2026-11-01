@@ -39,3 +39,6 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Synthetic customer data, fetched by scripts/fetch-customer-data.sh
+data/customer-profiles/

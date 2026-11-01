@@ -1,0 +1,25 @@
+{
+  "id": "CL-20261101-1751-ae37",
+  "timestamp": "2026-11-01T17:51:18Z",
+  "type": "fixed",
+  "summary": "Sandboxed commits work; projects get a README skeleton, integration guide, runbook, MIT license and a customer-data fetch script",
+  "reason": "The .env.* sandbox block hid .env.example from git so every Claude commit failed, and new projects inherited the setup guide as their README with no place for the deliverables or test data",
+  "issue": null,
+  "adr": null,
+  "branch": "claude/magical-goodall-v08isu",
+  "base_commit": "e02e5cb",
+  "author": "Claude",
+  "files": [
+    ".gitignore",
+    "CLAUDE.md",
+    "LICENSE",
+    "README.md",
+    "SPEC.md",
+    "docs/integration-guide.md",
+    "docs/runbook.md",
+    "docs/template-guide.md",
+    "scripts/README.md",
+    "scripts/fetch-customer-data.sh",
+    "setup/user-settings.json"
+  ]
+}
