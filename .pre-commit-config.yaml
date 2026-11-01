@@ -12,3 +12,13 @@ repos:
       - id: detect-private-key
       - id: end-of-file-fixer
       - id: trailing-whitespace
+  - repo: local
+    hooks:
+      # Regenerates docs/diagrams/architecture.md on every commit. If it changes, the
+      # commit stops so you can review it, `git add docs/diagrams`, and commit again.
+      - id: code-diagrams
+        name: Regenerate code diagrams
+        entry: python3 .claude/skills/changelog/changelog.py diagrams --fail-on-change
+        language: system
+        pass_filenames: false
+        always_run: true

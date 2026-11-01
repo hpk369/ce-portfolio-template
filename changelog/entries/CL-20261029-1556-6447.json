@@ -1,0 +1,19 @@
+{
+  "id": "CL-20261029-1556-6447",
+  "timestamp": "2026-10-29T15:56:03Z",
+  "type": "fixed",
+  "summary": "Changelog tool works from subfolders and handles odd filenames and bad entries; format hook touches only the edited file; TypeScript pinned to 6 for the LSP plugin",
+  "reason": "Testing found entries written to the wrong folder, quoted filenames, crashes on malformed entries, a hook that reformatted unrelated files, and a TypeScript 7 install that silently breaks typescript-lsp",
+  "issue": null,
+  "adr": null,
+  "branch": "claude/magical-goodall-v08isu",
+  "base_commit": "ec1e868",
+  "author": "Claude",
+  "files": [
+    ".claude/hooks/format-edited-file.sh",
+    ".claude/settings.json",
+    ".claude/skills/changelog/changelog.py",
+    "README.md",
+    "tests/test_changelog.py"
+  ]
+}

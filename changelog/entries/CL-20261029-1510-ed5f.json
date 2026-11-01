@@ -1,0 +1,27 @@
+{
+  "id": "CL-20261029-1510-ed5f",
+  "timestamp": "2026-10-29T15:10:52Z",
+  "type": "changed",
+  "summary": "Align skills, subagents and changelog tool with the skills-and-plugins guide",
+  "reason": "Custom pieces should only cover what built-in /code-review and /security-review can't (scope, decisions, deliverables, my own understanding), and changelog IDs need the CL- format plus a CI check that every PR records why it changed",
+  "issue": null,
+  "adr": null,
+  "branch": "claude/magical-goodall-v08isu",
+  "base_commit": "43cdde1",
+  "author": "Claude",
+  "files": [
+    ".claude/agents/reviewer.md",
+    ".claude/agents/scope-reviewer.md",
+    ".claude/skills/adr/SKILL.md",
+    ".claude/skills/changelog/SKILL.md",
+    ".claude/skills/changelog/changelog.py",
+    ".claude/skills/interview-me/SKILL.md",
+    ".claude/skills/ship-check/SKILL.md",
+    ".github/workflows/ci.yml",
+    "CLAUDE.md",
+    "README.md",
+    "SPEC.md",
+    "tests/.gitkeep",
+    "tests/test_changelog.py"
+  ]
+}
