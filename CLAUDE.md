@@ -1,6 +1,7 @@
 # Project
 Part of a Customer Engineer portfolio. Test data comes from the customer-profiles repo:
 three fictional customers (Fernhollow Financial, Cedarline Health Network, Relaypoint).
+`scripts/fetch-customer-data.sh` copies it into data/customer-profiles/ (gitignored).
 SPEC.md is the source of truth for scope. Anything not in SPEC.md is out of scope.
 
 # Commands

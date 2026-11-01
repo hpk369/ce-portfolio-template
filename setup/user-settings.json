@@ -3,12 +3,27 @@
   "autoUpdatesChannel": "stable",
   "permissions": {
     "deny": [
-      "Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.config/gh/**)",
-      "Read(.env)", "Read(.env.*)", "Read(!.env.example)",
-      "Read(**/*.pem)", "Read(**/*.key)",
-      "Bash(git push *)", "Bash(npm publish *)",
-      "Bash(terraform apply *)", "Bash(terraform destroy *)", "Bash(aws *)",
-      "Bash(curl *)", "Bash(wget *)", "Bash(rm -rf *)"
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(.env)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.*.local)",
+      "Read(**/.env.development)",
+      "Read(**/.env.production)",
+      "Read(**/.env.staging)",
+      "Read(**/.env.test)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Bash(git push *)",
+      "Bash(npm publish *)",
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(aws *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(rm -rf *)"
     ],
     "disableBypassPermissionsMode": "disable"
   },
@@ -16,20 +31,53 @@
     "enabled": true,
     "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
-    "excludedCommands": ["docker compose *"],
+    "excludedCommands": [
+      "docker compose *"
+    ],
+    "filesystem": {
+      "allowWrite": [
+        "~/.cache/pre-commit",
+        "~/.cache/uv",
+        "~/.npm"
+      ]
+    },
     "network": {
-      "allowedDomains": ["github.com", "*.github.com", "registry.npmjs.org", "pypi.org", "files.pythonhosted.org"]
+      "allowedDomains": [
+        "github.com",
+        "*.github.com",
+        "registry.npmjs.org",
+        "pypi.org",
+        "files.pythonhosted.org"
+      ]
     },
     "credentials": {
       "files": [
-        { "path": "~/.ssh", "mode": "deny" },
-        { "path": "~/.aws", "mode": "deny" }
+        {
+          "path": "~/.ssh",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.aws",
+          "mode": "deny"
+        }
       ],
       "envVars": [
-        { "name": "ANTHROPIC_API_KEY", "mode": "deny" },
-        { "name": "AWS_ACCESS_KEY_ID", "mode": "deny" },
-        { "name": "AWS_SECRET_ACCESS_KEY", "mode": "deny" },
-        { "name": "GITHUB_TOKEN", "mode": "deny" }
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "mode": "deny"
+        },
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "mode": "deny"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "mode": "deny"
+        },
+        {
+          "name": "GITHUB_TOKEN",
+          "mode": "deny"
+        }
       ]
     }
   }
